@@ -44,6 +44,8 @@
   .lg{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim);font-family:'IBM Plex Mono',monospace}
   .sw{width:13px;height:3px;border-radius:2px}
   .rangelbl{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-faint)}
+  .ovl{display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-dim);cursor:pointer;user-select:none}
+  .ovl input{accent-color:#7c7cff;cursor:pointer;width:14px;height:14px}
   canvas{display:block;width:100%}
   .maincv{height:300px;cursor:crosshair}
   .ovcv{height:56px;cursor:crosshair;margin-top:8px}
@@ -79,7 +81,10 @@
     </div>
     <div class="charthead">
       <div class="legend" id="legend"></div>
-      <div class="rangelbl" id="rangelbl"></div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <label class="ovl"><input type="checkbox" id="ovlpow" checked> compute power (right axis)</label>
+        <div class="rangelbl" id="rangelbl"></div>
+      </div>
     </div>
     <div style="position:relative">
       <canvas class="maincv" id="main"></canvas>
@@ -141,7 +146,8 @@
     power:{keys:['pc','pt'],colors:{pc:'#7c7cff',pt:'#3ddc97'},labels:{pc:'Compute',pt:'Total'},lo:0,hi:30,unit:'MW',envelope:'pc'},
     pue:{keys:['pue'],colors:{pue:'#e64d9b'},labels:{pue:'PUE'},lo:1,hi:1.6,unit:'',envelope:'pue'},
   };
-  let metric='temps', i0=0, i1=N-1, hoverI=-1, sel={on:false,a:0,b:0};
+  let metric='temps', i0=0, i1=N-1, hoverI=-1, sel={on:false,a:0,b:0}, overlayPower=true;
+  const canOverlay=()=>overlayPower&&metric!=='power';
 
   // ---- canvas helpers ----
   function setup(cv){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*dpr;cv.height=h*dpr;const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);return{c,w,h};}
@@ -152,7 +158,7 @@
 
   function drawMain(){
     const cv=$('main');const{c,w,h}=setup(cv);c.clearRect(0,0,w,h);
-    const cfg=M[metric],padL=44,padR=14,padT=12,padB=26,pw=w-padL-padR,ph=h-padT-padB;
+    const cfg=M[metric],padL=44,padR=canOverlay()?52:14,padT=12,padB=26,pw=w-padL-padR,ph=h-padT-padB;
     const X=f=>padL+f*pw, Y=v=>padT+(1-(v-cfg.lo)/(cfg.hi-cfg.lo))*ph;
     // grid + y labels
     c.strokeStyle='#17242f';c.fillStyle='#5c7385';c.font="11px 'IBM Plex Mono',monospace";c.lineWidth=1;
@@ -177,6 +183,23 @@
     for(const key of cfg.keys){const bk=bucket(key);c.beginPath();let st=false;
       for(const b of bk){if(!b){st=false;continue;}const x=X(b.x),y=Y(b.mean);if(!st){c.moveTo(x,y);st=true;}else c.lineTo(x,y);}
       c.strokeStyle=cfg.colors[key];c.lineWidth=key===cfg.envelope?1.6:1.4;c.stroke();}
+    // ---- compute power overlay on right axis ----
+    if(canOverlay()){
+      const P2HI=30,Y2=v=>padT+(1-v/P2HI)*ph;
+      c.fillStyle='#9a9aff';c.font="11px 'IBM Plex Mono',monospace";c.textAlign='left';c.textBaseline='middle';
+      for(let k=0;k<=5;k++){const v=P2HI*k/5,y=Y2(v);c.fillText(v.toFixed(0),w-padR+7,y);}
+      c.save();c.translate(w-11,padT+ph/2);c.rotate(Math.PI/2);c.textAlign='center';c.fillStyle='#9a9aff';c.fillText('Compute power (MW)',0,0);c.restore();
+      const bp=bucket('pc');
+      // faint range band for power
+      c.beginPath();let s2=false;
+      for(const b of bp){if(!b){s2=false;continue;}const x=X(b.x);if(!s2){c.moveTo(x,Y2(b.hi));s2=true;}else c.lineTo(x,Y2(b.hi));}
+      for(let j=bp.length-1;j>=0;j--){const b=bp[j];if(!b)continue;c.lineTo(X(b.x),Y2(b.lo));}
+      c.closePath();c.globalAlpha=.10;c.fillStyle='#7c7cff';c.fill();c.globalAlpha=1;
+      // mean line
+      c.beginPath();let st=false;
+      for(const b of bp){if(!b){st=false;continue;}const x=X(b.x),y=Y2(b.mean);if(!st){c.moveTo(x,y);st=true;}else c.lineTo(x,y);}
+      c.strokeStyle='#7c7cff';c.lineWidth=1.3;c.stroke();
+    }
     // hover crosshair
     if(hoverI>=i0&&hoverI<=i1){const f=(hoverI-i0)/(i1-i0),x=X(f);c.strokeStyle='#3d5568';c.setLineDash([3,3]);c.beginPath();c.moveTo(x,padT);c.lineTo(x,h-padB);c.stroke();c.setLineDash([]);}
     // drag-to-zoom selection
@@ -229,6 +252,7 @@
     const cfg=M[metric];let html='';
     for(const key of cfg.keys)html+=`<span class="lg"><span class="sw" style="background:${cfg.colors[key]}"></span>${cfg.labels[key]}</span>`;
     if(cfg.envelope)html+=`<span class="lg"><span class="sw" style="height:9px;background:${cfg.colors[cfg.envelope]};opacity:.2"></span>10-min range</span>`;
+    if(canOverlay())html+=`<span class="lg"><span class="sw" style="background:#7c7cff"></span>Compute power</span>`;
     $('legend').innerHTML=html;
     const s=new Date(tAt(i0)).toLocaleString('en',{month:'short',day:'numeric',timeZone:'UTC'});
     const e=new Date(tAt(i1)).toLocaleString('en',{month:'short',day:'numeric',timeZone:'UTC'});
@@ -240,6 +264,7 @@
   // tabs
   $('tabs').addEventListener('click',e=>{const b=e.target.closest('.tab');if(!b)return;
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));b.classList.add('active');metric=b.dataset.m;renderAll();});
+  $('ovlpow').addEventListener('change',e=>{overlayPower=e.target.checked;renderAll();});
 
   // overview brush
   const ov=$('ov');let dragging=false,dragStart=0;
@@ -251,13 +276,14 @@
 
   // main chart: hover tooltip + drag-to-zoom
   const main=$('main'),tip=$('tip');
-  function mainFrac(e){const r=main.getBoundingClientRect();const padL=44,padR=14,pw=r.width-padL-padR;return Math.min(1,Math.max(0,(e.clientX-r.left-padL)/pw));}
+  function mainFrac(e){const r=main.getBoundingClientRect();const padL=44,padR=canOverlay()?52:14,pw=r.width-padL-padR;return Math.min(1,Math.max(0,(e.clientX-r.left-padL)/pw));}
   main.addEventListener('mousedown',e=>{sel.on=true;sel.a=sel.b=mainFrac(e);tip.style.opacity=0;hoverI=-1;drawMain();e.preventDefault();});
   main.addEventListener('mousemove',e=>{
     if(sel.on)return;
     const r=main.getBoundingClientRect();const f=mainFrac(e);hoverI=Math.round(i0+(i1-i0)*f);
     const cfg=M[metric];let lines=[new Date(tAt(hoverI)).toLocaleString('en',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'UTC',hour12:false})];
     for(const key of cfg.keys){const v=val(key,hoverI);lines.push(`${cfg.labels[key]}: ${v==null?'—':v.toFixed(cfg.unit==='°C'||cfg.unit==='MW'?1:3)}${cfg.unit}`);}
+    if(canOverlay()){const vp=val('pc',hoverI);lines.push(`Compute: ${vp==null?'—':vp.toFixed(1)} MW`);}
     tip.innerHTML=lines.join('<br>');tip.style.opacity=1;let tx=e.clientX-r.left+12;if(tx>r.width-140)tx=e.clientX-r.left-140;tip.style.left=tx+'px';tip.style.top=(e.clientY-r.top-10)+'px';drawMain();
   });
   main.addEventListener('mouseleave',()=>{if(!sel.on){tip.style.opacity=0;hoverI=-1;drawMain();}});
